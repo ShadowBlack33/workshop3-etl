@@ -29,6 +29,7 @@ Build a full pipeline that:
 ## 2) Architecture
 
 ### 2.1 High‑level (Mermaid)
+```mermaid
 flowchart LR
   subgraph RAW[CSV: 2015–2019]
     A2015[2015.csv]
@@ -50,7 +51,7 @@ flowchart LR
   F --> G{{SQL Views:<br/>predictions_enriched<br/>kpis_globales<br/>kpis_por_anio<br/>top10_peores_errores<br/>scatter_ready}}
   G --> H[tools/export_kpis.py → CSVs]
   H --> I[Power BI Dashboard]
-
+```
 ### 2.2 Sequence of streaming (Mermaid)
 ```mermaid
 sequenceDiagram
