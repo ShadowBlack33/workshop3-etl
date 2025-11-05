@@ -60,7 +60,7 @@ flowchart LR
   %% --- Storage & KPIs ---
   subgraph Storage["Storage & KPIs"]
     db["SQLite db/predictions.db"]
-    views["SQL views: predictions_enriched, kpis_globales, kpis_por_anio, top10_peores_errores, scatter_ready"]
+    views["SQL views: predictions_enriched, kpis_globales, kpis_por_año, top10_peores_errores, scatter_ready"]
     export["Export CSVs (tools/export_kpis.py)"]
   end
 
