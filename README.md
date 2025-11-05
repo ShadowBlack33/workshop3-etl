@@ -29,29 +29,27 @@ Build a full pipeline that:
 ## 2) Architecture
 
 ### 2.1 High‑level (Mermaid)
-```mermaid
 flowchart LR
-    subgraph RAW[CSV: 2015..2019]
-        A2015[2015.csv]
-        A2016[2016.csv]
-        A2017[2017.csv]
-        A2018[2018.csv]
-        A2019[2019.csv]
-    end
+  subgraph RAW[CSV: 2015–2019]
+    A2015[2015.csv]
+    A2016[2016.csv]
+    A2017[2017.csv]
+    A2018[2018.csv]
+    A2019[2019.csv]
+  end
 
-    RAW --> B[EDA & Unification (notebooks/EDA.ipynb)]
-    B --> C[Train (src/train_model.py)\nLinearRegression + 70/30 split]
-    C --> P[model/happiness_model.pkl]
+  RAW --> B[EDA & Unification<br/>(notebooks/EDA.ipynb)]
+  B --> C[Train (src/train_model.py)<br/>LinearRegression + 70/30 split]
+  C --> P[model/happiness_model.pkl]
 
-    P -.loads.-> D[Producer (kafka/producer.py)\nSends JSON records to Kafka topic]
-    RAW -.features.-> D
+  P -.-> D[Producer (kafka/producer.py)]
+  RAW -.-> D
 
-    D -->|Kafka| E[Consumer (kafka/consumer.py)]
-    E -->|predicts using .pkl| F[(SQLite db/predictions.db)]
-    F --> G{{SQL Views:\npredictions_enriched\nkpis_globales\nkpis_por_anio\ntop10_peores_errores\nscatter_ready}}
-    G --> H[tools/export_kpis.py → CSVs]
-    H --> I[Power BI Dashboard]
-```
+  D -- Kafka --> E[Consumer (kafka/consumer.py)]
+  E -- predicts using .pkl --> F[(SQLite db/predictions.db)]
+  F --> G{{SQL Views:<br/>predictions_enriched<br/>kpis_globales<br/>kpis_por_anio<br/>top10_peores_errores<br/>scatter_ready}}
+  G --> H[tools/export_kpis.py → CSVs]
+  H --> I[Power BI Dashboard]
 
 ### 2.2 Sequence of streaming (Mermaid)
 ```mermaid
