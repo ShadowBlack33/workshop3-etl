@@ -4,8 +4,8 @@
 
 ---
 
-## Badges (optional)
-> Replace `your-username/your-repo` after you push to GitHub.
+## Badges
+> ShadowBlack33/workshop3-etl
 
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)]()
 [![scikit-learn](https://img.shields.io/badge/scikit--learn-ML-orange.svg)]()
@@ -296,19 +296,6 @@ python tools/export_kpis.py
 
 ---
 
-## 10) GitHub Tips
-
-**.gitignore (suggested):**
-```
-.venv/
-__pycache__/
-db/*.db
-data/export/*.csv
-data/reports/*.csv
-.ipynb_checkpoints/
-.DS_Store
-```
-
 Include in repo:
 - `notebooks/EDA.ipynb`
 - `src/*.py`, `kafka/*.py`, `tools/export_kpis.py`
@@ -316,11 +303,3 @@ Include in repo:
 - `docs/REPORT.md`
 - `docker-compose.yml`, `.env` (if allowed), and this `README.md`
 
----
-
-## 11) Next Steps
-
-- Try **Ridge/Lasso** and **tree‑based** models (RandomForest/XGBoost)
-- Feature engineering (log transforms, interactions)
-- Time‑aware validation & drift monitoring
-- Enhance dashboard with decomposition by region and robustness checks
