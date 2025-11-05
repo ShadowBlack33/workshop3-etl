@@ -31,26 +31,63 @@ Build a full pipeline that:
 ### 2.1 High‑level (Mermaid)
 ```mermaid
 flowchart LR
-  subgraph RAW[CSV: 2015–2019]
-    A2015[2015.csv]
-    A2016[2016.csv]
-    A2017[2017.csv]
-    A2018[2018.csv]
-    A2019[2019.csv]
+  %% --- Data Ingest ---
+  subgraph Ingest["CSV files (2015-2019)"]
+    f2015["2015.csv"]
+    f2016["2016.csv"]
+    f2017["2017.csv"]
+    f2018["2018.csv"]
+    f2019["2019.csv"]
   end
 
-  RAW --> B[EDA & Unification<br/>(notebooks/EDA.ipynb)]
-  B --> C[Train (src/train_model.py)<br/>LinearRegression + 70/30 split]
-  C --> P[model/happiness_model.pkl]
+  %% --- Prep & EDA ---
+  subgraph Prep["Prep & EDA"]
+    eda["EDA + Unification (notebooks/EDA.ipynb)"]
+  end
 
-  P -.-> D[Producer (kafka/producer.py)]
-  RAW -.-> D
+  %% --- Training ---
+  subgraph Model["Training"]
+    train["Train (src/train_model.py)"]
+    pkl["happiness_model.pkl"]
+  end
 
-  D -- Kafka --> E[Consumer (kafka/consumer.py)]
-  E -- predicts using .pkl --> F[(SQLite db/predictions.db)]
-  F --> G{{SQL Views:<br/>predictions_enriched<br/>kpis_globales<br/>kpis_por_anio<br/>top10_peores_errores<br/>scatter_ready}}
-  G --> H[tools/export_kpis.py → CSVs]
-  H --> I[Power BI Dashboard]
+  %% --- Streaming ---
+  subgraph Stream["Streaming"]
+    prod["Kafka Producer (kafka/producer.py)"]
+    cons["Kafka Consumer (kafka/consumer.py)"]
+  end
+
+  %% --- Storage & KPIs ---
+  subgraph Storage["Storage & KPIs"]
+    db["SQLite db/predictions.db"]
+    views["SQL views: predictions_enriched, kpis_globales, kpis_por_anio, top10_peores_errores, scatter_ready"]
+    export["Export CSVs (tools/export_kpis.py)"]
+  end
+
+  %% --- BI ---
+  subgraph BI["Dashboard"]
+    pbi["Power BI"]
+  end
+
+  %% --- Flows ---
+  f2015 --> eda
+  f2016 --> eda
+  f2017 --> eda
+  f2018 --> eda
+  f2019 --> eda
+
+  eda --> train
+  train --> pkl
+
+  eda --> prod
+  pkl --> prod
+  prod -->|Kafka| cons
+
+  cons --> db
+  db --> views
+  views --> export
+  export --> pbi
+
 ```
 ### 2.2 Sequence of streaming (Mermaid)
 ```mermaid
