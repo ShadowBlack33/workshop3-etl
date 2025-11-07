@@ -338,6 +338,7 @@ flowchart LR
   %% Consumer guarda en el DW y BI consume
   CONS --> PRED
   PRED --> PBI
+
 ```
 
 ---
@@ -602,3 +603,4 @@ Con esto el profesor ve:
   * Se construyen dashboards limpios y defendibles.
 
 Este documento sirve como respaldo técnico del proyecto para revisión académica o profesional.
+
