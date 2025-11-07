@@ -1,187 +1,330 @@
-# Workshop 3 – Model Evaluation & Reporting
+# Workshop 3 – End-to-End Architecture & Model Evaluation 📊
 
-**Dataset:** World Happiness Report (2015–2019)  
-**Arquitectura:** ETL + ML + Streaming con Kafka + Data Warehouse en PostgreSQL + Dashboard en Power BI  
-**Modelo:** Linear Regression (70% train / 30% test)
+**Caso de uso:** Predicción y análisis del `Happiness Score` (World Happiness Report 2015–2019) usando un pipeline completo:
+
+**ETL → EDA → Entrenamiento de modelo → Kafka Streaming → Consumer con modelo → Data Warehouse en PostgreSQL → Dashboard en Power BI**
+
+Este documento describe en detalle:
+
+- Los datasets utilizados.
+- La lógica de ETL y el análisis exploratorio.
+- El modelo seleccionado y cómo se entrena.
+- La arquitectura de streaming con Kafka.
+- La estructura del Data Warehouse (`predictions` en PostgreSQL).
+- Cómo todo se integra para evaluación y visualización.
 
 ---
 
-## 1. Data & EDA (Exploratory Data Analysis)
+## 1. Tecnologías y herramientas ⚙️
 
-### 1.1. Origen de los datos
+Este proyecto está diseñado como un mini ecosistema de datos moderno:
 
-Se utilizan los datasets oficiales del World Happiness Report para los años:
+- 🐍 **Python 3**  
+  Lenguaje principal para ETL, entrenamiento, streaming y conexión a la base de datos.
 
-- `2015.csv`
-- `2016.csv`
-- `2017.csv`
-- `2018.csv`
-- `2019.csv`
+- 📓 **Jupyter Notebooks**
+  - `notebooks/EDA.ipynb`: análisis exploratorio de datos.
+  - `notebooks/ModelTraining.ipynb`: experimentos con el modelo antes de consolidar en scripts.
 
-Estos archivos se encuentran en la carpeta `data/` del proyecto.
+- 🔁 **Apache Kafka**
+  - Canal de streaming para enviar fila por fila los registros ya transformados.
+  - Topic principal: `happiness_features`.
 
-### 1.2. Unificación y limpieza
+- 🐘 **PostgreSQL**
+  - Se usa como **Data Warehouse**.
+  - Guarda la tabla final `predictions` con:
+    - Features
+    - Valor real (`y_true`)
+    - Predicción (`y_pred`)
+    - Flags de si fue train/test
 
-Debido a que cada año presenta ligeras variaciones en nombres de columnas, se realiza un proceso de estandarización en `src/etl.py`, que también es reutilizado por el entrenamiento del modelo y el productor de Kafka (ETL único, consistente).
+- 🐳 **Docker / docker-compose**
+  - Orquesta servicios de:
+    - Kafka
+    - Zookeeper
+    - PostgreSQL
 
-Principales transformaciones:
+- 🧩 **Visual Studio Code**
+  - Editor principal del proyecto.
+  - Extensiones clave:
+    - Python
+    - Jupyter
+    - SQLTools + SQLTools PostgreSQL Driver (para inspeccionar la base desde VS Code).
 
-- Normalización de nombres:
-  - `Country` / `Country or region` → `Country`
-  - `Happiness Score` / `Score` → `Happiness Score`
-  - `Economy (GDP per Capita)` / `GDP per capita` → `GDP per capita`
-  - `Health (Life Expectancy)` / `Healthy life expectancy` → `Healthy life expectancy`
-  - Columnas de soporte social, libertad y corrupción alineadas a:
-    - `Social support`
-    - `Freedom`
-    - `Perceptions of corruption`
-- Conversión a tipos numéricos para las variables relevantes.
-- Inclusión explícita de la columna `Year`.
+- 📊 **Power BI Desktop**
+  - Herramienta de visualización para construir el dashboard final consumiendo directamente de PostgreSQL.
 
-El dataset unificado final utilizado para modelado y streaming contiene:
+- 📦 **scikit-learn**
+  - Librería usada para entrenar el modelo de regresión lineal.
+
+---
+
+## 2. Estructura del repositorio 📁
+
+La estructura está pensada para separar claramente responsabilidades:
 
 ```text
-Country
-Year
-Happiness Score
-GDP per capita
-Social support
-Healthy life expectancy
-Freedom
-Perceptions of corruption
+.
+├─ data/
+│  ├─ 2015.csv
+│  ├─ 2016.csv
+│  ├─ 2017.csv
+│  ├─ 2018.csv
+│  └─ 2019.csv
+│     # Archivos originales del World Happiness Report.
+│
+├─ db/
+│  └─ pgdata/
+│     # Volumen de datos de PostgreSQL (montado por Docker).
+│
+├─ docs/
+│  ├─ REPORT.md
+│     # Este documento técnico.
+│
+├─ kafka/
+│  ├─ producer.py
+│  │   # Lee los CSV, aplica ETL, marca train/test, envía registros a Kafka.
+│  └─ consumer.py
+│      # Lee desde Kafka, aplica modelo, guarda en PostgreSQL (tabla predictions).
+│
+├─ model/
+│  └─ happiness_model.pkl
+│     # Modelo entrenado (LinearRegression) serializado.
+│
+├─ notebooks/
+│  ├─ EDA.ipynb
+│  │   # Exploración, unificación de columnas, análisis estadístico y visualizaciones.
+│  └─ ModelTraining.ipynb
+│      # Pruebas de modelos, comparación, soporte para definir la versión final.
+│
+├─ src/
+│  ├─ __init__.py
+│  ├─ etl.py
+│  │   # Funciones reutilizables:
+│  │   #   - Carga y limpieza de los 5 CSV.
+│  │   #   - Normalización de columnas.
+│  │   #   - Construcción del dataset unificado.
+│  ├─ train_model.py
+│  │   # Script de entrenamiento final:
+│  │   #   - Usa etl.load_unified()
+│  │   #   - Aplica split 70/30
+│  │   #   - Entrena LinearRegression
+│  │   #   - Calcula métricas
+│  │   #   - Guarda happiness_model.pkl
+│  └─ evaluate.py (opcional)
+│      # Helpers para cálculo de métricas fuera de línea (si se requiere).
+│
+├─ docker-compose.yml
+│   # Define servicios de Kafka, Zookeeper y PostgreSQL.
+│
+├─ requirements.txt
+│   # Dependencias del entorno Python.
+│
+├─ .env
+│   # Configuración de conexión (Kafka, Postgres, etc.).
+│
+└─ README.md
+    # Guía rápida de uso del proyecto.
 ````
 
-### 1.3. Manejo de valores faltantes y outliers
+---
 
-* Se descartan filas con valores faltantes en las columnas utilizadas directamente para el modelo.
-* No se aplica winsorización ni transformaciones agresivas de outliers en la versión final:
+## 3. Diseño de datos y ETL 🧹
 
-  * Durante el EDA se exploró el impacto de truncar valores extremos.
-  * No se observaron mejoras significativas en el rendimiento del modelo.
-  * Se documenta la decisión y se mantiene el dataset más cercano a los datos originales.
+### 3.1. Problema inicial
 
-### 1.4. Hallazgos principales del EDA
+Los archivos de 2015–2019 no tienen el mismo esquema:
 
-* Fuerte correlación positiva entre:
+* Cambian nombres de columnas.
+* Algunas columnas existen solo en ciertos años.
+* Hay variaciones en cómo se llama al país, score, etc.
 
-  * `GDP per capita`, `Social support`, `Healthy life expectancy` y `Happiness Score`.
-* `Freedom` y `Perceptions of corruption` también aportan señal relevante.
-* Estos resultados justifican la selección de features para el modelo lineal.
+Ejemplos:
 
-> El detalle completo del análisis se encuentra en `notebooks/EDA.ipynb`.
+* `Country` vs `Country or region`
+* `Happiness Score` vs `Score`
+* `Economy (GDP per Capita)` vs `GDP per capita`
+* `Health (Life Expectancy)` vs `Healthy life expectancy`
+* `Trust (Government Corruption)` vs `Perceptions of corruption`
+
+### 3.2. Solución en `src/etl.py`
+
+`etl.py` concentra TODA la lógica de limpieza.
+Esto es clave porque:
+
+* El **EDA**, el **entrenamiento** y el **producer** usan exactamente la misma lógica.
+* Evita “trampa” de usar datasets distintos en training vs producción.
+
+Pasos principales del ETL:
+
+1. **Lectura por año**:
+
+   * Para cada archivo (`2015.csv`…`2019.csv`) se aplica un mapeo específico a nombres estándar.
+
+2. **Estandarización de columnas clave**:
+
+   * Se construye un esquema común con las columnas:
+
+     ```text
+     Country
+     Year
+     Happiness Score
+     GDP per capita
+     Social support
+     Healthy life expectancy
+     Freedom
+     Perceptions of corruption
+     ```
+
+3. **Tipos de datos**:
+
+   * Conversión a `float` para features numéricas.
+   * Conversión de `Year` a entero.
+   * Filtrado de filas con nulos en las columnas clave (para el modelo).
+
+4. **Dataset final**:
+
+   * Se genera un DataFrame unificado `df_all` que combina 2015–2019 con esquema consistente.
+   * Este es la base para:
+
+     * EDA
+     * Entrenamiento
+     * Streaming
+
+### 3.3. EDA (`notebooks/EDA.ipynb`)
+
+Dentro del notebook se hace:
+
+* Descriptivos generales (media, min, max, etc.).
+* Distribuciones por feature.
+* Correlación entre:
+
+  * `Happiness Score` y cada feature.
+* Comparación por años para ver estabilidad del comportamiento.
+
+**Decisión importante:**
+
+* No se implementa winsorización ni tratamiento fuerte de outliers en el pipeline final.
+* Se analizan outliers en el EDA (para entenderlos), pero no se alteran los datos productivos:
+
+  * Esto mantiene interpretabilidad.
+  * Evita modificar artificialmente regiones extremas.
 
 ---
 
-## 2. Entrenamiento del Modelo
+## 4. Entrenamiento del modelo 🎯
 
-### 2.1. Configuración
+### 4.1. Script: `src/train_model.py`
 
-* Modelo: **Linear Regression** (regresión lineal múltiple).
-* Script: `src/train_model.py`
-* Features utilizadas:
+Responsabilidades:
 
-```python
-FEATURES = [
-    "GDP per capita",
-    "Social support",
-    "Healthy life expectancy",
-    "Freedom",
-    "Perceptions of corruption",
-]
-TARGET = "Happiness Score"
-```
+1. Llama a `load_unified()` de `etl.py`.
 
-### 2.2. Proceso
+2. Selecciona solo columnas completas en `FEATURES + TARGET`.
 
-1. Se llama a `load_unified()` en `src/etl.py` para asegurar el mismo ETL usado luego en producción.
-2. Se filtran filas con datos completos en `FEATURES + TARGET`.
-3. Se realiza un **split 70% / 30%** con `random_state=42`:
+3. Define:
 
-   * 70% → entrenamiento.
-   * 30% → prueba.
-4. Se entrena el modelo `LinearRegression` con los datos de entrenamiento.
-5. Se evalúa el modelo usando **solo el test set**.
-6. El modelo entrenado se guarda como:
+   ```python
+   FEATURES = [
+       "GDP per capita",
+       "Social support",
+       "Healthy life expectancy",
+       "Freedom",
+       "Perceptions of corruption",
+   ]
+   TARGET = "Happiness Score"
+   ```
 
-```text
-model/happiness_model.pkl
-```
+4. Aplica `train_test_split`:
 
-### 2.3. Métricas (sobre test set)
+   * `test_size=0.30`
+   * `random_state=42` (misma semilla usada luego en el producer para marcar train/test).
 
-Ejemplo de resultados obtenidos:
+5. Entrena `LinearRegression`.
 
-* **R²:** 0.804
-* **MAE:** 0.401
-* **RMSE:** 0.532
-* Muestra:
+6. Calcula métricas en el **test set** (solo test, nada de mezclar train):
 
-  * El modelo explica una buena parte de la variabilidad del `Happiness Score`.
-  * El error medio es razonable para la escala (0–10 aprox).
+   * R²
+   * MAE
+   * RMSE
 
-> Las métricas exactas se generan al correr `python -m src.train_model` y se muestran en consola con un resumen formateado.
+7. Muestra resultados en consola con formato claro.
 
----
+8. Guarda el modelo entrenado en:
 
-## 3. Arquitectura de Streaming & Data Warehouse
+   ```text
+   model/happiness_model.pkl
+   ```
 
-### 3.1. Objetivo
+### 4.2. Justificación del modelo
 
-Implementar un flujo reproducible donde:
+* La relación entre las variables seleccionadas y `Happiness Score` es casi lineal o monótona.
+* Linear Regression:
 
-1. Los mismos datos y lógica de ETL usados para entrenar el modelo se utilicen en producción.
-2. Cada registro tenga trazabilidad:
-
-   * Si fue usado para entrenamiento (`is_train`).
-   * Si fue usado para prueba (`is_test`).
-   * Cuál fue su valor real (`y_true`).
-   * Cuál fue la predicción del modelo (`y_pred`).
-3. Todo quede centralizado en un **Data Warehouse PostgreSQL** para análisis y dashboard.
+  * Es interpretable.
+  * Permite ver el peso de cada feature.
+  * Es suficiente para el alcance del workshop.
 
 ---
 
-## 4. Kafka Producer
+## 5. Arquitectura de Streaming ☁️
 
-**Archivo:** `kafka/producer.py`
+Aquí conectamos todo: ETL + modelo + Kafka + Postgres.
 
-### 4.1. Responsabilidades
+### 5.1. Diagrama general (High-level)
 
-* Leer los 5 archivos crudos desde `data/`.
+```mermaid
+flowchart LR
+  subgraph RAW[CSV: 2015–2019]
+    A2015[2015.csv]
+    A2016[2016.csv]
+    A2017[2017.csv]
+    A2018[2018.csv]
+    A2019[2019.csv]
+  end
 
-* Aplicar la misma lógica de ETL que el EDA/modelo (`src/etl.py`).
+  RAW --> B[ETL unificado<br/>(src/etl.py)]
+  B --> C[Entrenamiento<br/>(src/train_model.py)]
+  C --> M[Modelo .pkl<br/>(happiness_model.pkl)]
 
-* Reconstruir el split 70/30 con la misma semilla utilizada en el entrenamiento.
+  B --> P[Producer<br/>(kafka/producer.py)]
+  M -. usado por .-> CO[Consumer<br/>(kafka/consumer.py)]
 
-* Agregar:
+  P -- mensajes JSON --> K[(Kafka<br/>topic: happiness_features)]
+  K --> CO
+  CO --> DW[(PostgreSQL<br/>tabla: predictions)]
 
-  * `is_train` = 1 si la fila pertenece al conjunto de entrenamiento; 0 en caso contrario.
-  * `is_test` = 1 si la fila pertenece al conjunto de prueba; 0 en caso contrario.
-  * `y_true` = `Happiness Score` original.
-
-* Enviar **cada registro** como un mensaje JSON al topic:
-
-```text
-happiness_features
+  DW --> BI[Power BI<br/>Dashboard]
 ```
 
-### 4.2. Ejemplo de mensaje enviado
+---
 
-```json
-{
-  "Country": "France",
-  "Year": 2018,
-  "GDP per capita": 1.324,
-  "Social support": 1.472,
-  "Healthy life expectancy": 0.996,
-  "Freedom": 0.450,
-  "Perceptions of corruption": 0.183,
-  "Happiness Score": 6.489,
-  "is_train": 1,
-  "is_test": 0
-}
-```
+## 6. Producer – `kafka/producer.py` 📤
 
-### 4.3. Ejemplo de salida en consola
+### 6.1. Rol
+
+El producer **simula** el flujo de datos hacia Kafka, pero respetando el mismo pipeline lógico que usamos para entrenar.
+
+Pasos:
+
+1. Llama `load_unified()` para construir el dataset limpio.
+2. Repite internamente el `train_test_split` con la misma semilla (42) para saber:
+
+   * Qué filas son **train**.
+   * Qué filas son **test**.
+3. Crea las columnas:
+
+   * `is_train` (1/0)
+   * `is_test` (1/0)
+   * `y_true` (`Happiness Score` original).
+4. Construye un JSON por fila con:
+
+   * Identidad: `Country`, `Year`
+   * Features: `GDP per capita`, `Social support`, `Healthy life expectancy`, `Freedom`, `Perceptions of corruption`
+   * Metadata: `y_true`, `is_train`, `is_test`
+5. Envía cada mensaje al topic `happiness_features`.
+
+### 6.2. Output esperado (ejemplo)
 
 ```text
 [producer] using topic=happiness_features @ localhost:9092
@@ -195,23 +338,31 @@ happiness_features
 [producer] done. sent=781 → topic=happiness_features @ localhost:9092
 ```
 
+Puntos clave:
+
+* No lee un dataset “ya unido” externo: él mismo ejecuta el ETL.
+* Respeta el split original para que el análisis en el DW sea coherente.
+
 ---
 
-## 5. Kafka Consumer → PostgreSQL
+## 7. Consumer – `kafka/consumer.py` 📥
 
-**Archivo:** `kafka/consumer.py`
+### 7.1. Rol
 
-### 5.1. Responsabilidades
+El consumer es quien convierte el stream en algo útil:
 
-* Escuchar el topic `happiness_features`.
-* Para cada mensaje:
+1. Escucha el topic `happiness_features`.
+2. Por cada mensaje:
 
-  * Construir el vector de features con el mismo orden del entrenamiento.
-  * Cargar el modelo `happiness_model.pkl`.
-  * Calcular la predicción `y_pred`.
-* Persistir la información en PostgreSQL en la tabla `predictions` usando **UPSERT**, evitando duplicados al reejecutar el flujo.
+   * Extrae las features.
+   * Carga el modelo `happiness_model.pkl` (al inicio).
+   * Calcula `y_pred` usando las mismas columnas que en el entrenamiento.
+3. Inserta el registro en PostgreSQL en la tabla `predictions` usando:
 
-### 5.2. Esquema de la tabla `predictions`
+   * `INSERT ... ON CONFLICT ... DO UPDATE`
+     (para no duplicar cuando se reenvían los mismos datos).
+
+### 7.2. Esquema de la tabla `predictions` en PostgreSQL
 
 ```sql
 CREATE TABLE IF NOT EXISTS predictions (
@@ -230,23 +381,20 @@ CREATE TABLE IF NOT EXISTS predictions (
 );
 ```
 
-### 5.3. Contenido
+* La clave única garantiza:
 
-Cada fila en `predictions` contiene:
+  * Si se vuelve a correr el pipeline, no se duplican filas.
+  * Cada combinación país-año-split aparece una sola vez.
 
-* **Datos originales**: `country`, `year`, `gdp`, `social`, `health`, `freedom`, `corrupt`
-* **Etiquetas y banderas**:
+### 7.3. Lógica interna resumida
 
-  * `y_true`: felicidad real.
-  * `is_train`: 1 si se usó para entrenar, 0 si no.
-  * `is_test`: 1 si se usó para test, 0 si no.
-* **Modelo**:
+* Deserializa el JSON del mensaje.
+* Ordena las features correctamente.
+* `model.predict(X)` → `y_pred`.
+* Construye un `INSERT` con UPSERT.
+* Muestra en consola un resumen legible (país, año, flags, valores).
 
-  * `y_pred`: predicción del modelo lineal.
-
-### 5.4. Ejemplo de salida en consola
-
-El consumer imprime un resumen amigable por registro, incluyendo si pertenece al set de entrenamiento o prueba y estadísticas acumuladas por país (R²/MAE rolling para revisión rápida):
+Ejemplo de log:
 
 ```text
 [consumer] ready
@@ -257,65 +405,157 @@ El consumer imprime un resumen amigable por registro, incluyendo si pertenece al
   • postgres:   workshop@localhost:5432/workshop3
   • table:      predictions
 --------------------------------------------------------------
-
 ┌──────────────────────────────────────────────────────────────┐
 │ France (2018)                                               │
 ├──────────────────────────────────────────────────────────────┤
-│R²: 0.812    MAE: 0.320                                      │
 │y_true: 6.489    y_pred: 6.402                               │
 │train: 1    test: 0                                          │
 └──────────────────────────────────────────────────────────────┘
-
-✓ upsert batch=200  total=200
+...
 ✔ finished. total_upserted=781
 ```
 
 ---
 
-## 6. Evaluación del Modelo a partir del Data Warehouse
+## 8. Evaluación del modelo desde el Data Warehouse 📈
 
-Con la tabla `predictions` en PostgreSQL se pueden calcular los KPIs del modelo directamente (via SQL, Power BI u otra herramienta):
+Con todo en `predictions`, podemos evaluar el modelo **directamente en PostgreSQL** o desde Power BI filtrando:
 
-### 6.1. Ejemplos de KPIs recomendados
+* **Entrenamiento:** `is_train = 1`
+* **Prueba:** `is_test = 1`
 
-* **KPIs globales (solo test set):**
+### 8.1. Ejemplos de consultas SQL (lado servidor)
 
-  * `R²_test`
-  * `MAE_test`
-  * `RMSE_test`
+**Métricas globales en test:**
 
-* **KPIs por año (solo test set):**
+```sql
+SELECT
+    COUNT(*)                           AS n,
+    AVG(ABS(y_true - y_pred))          AS mae,
+    SQRT(AVG(POWER(y_true - y_pred,2))) AS rmse
+FROM predictions
+WHERE is_test = 1;
+```
 
-  * Métricas por `year` para analizar estabilidad temporal.
-  * Detección de años con peor desempeño (posible drift o cambios estructurales).
+**R² global en test:**
 
-* **Top errores (solo test set):**
+```sql
+WITH stats AS (
+    SELECT
+        AVG(y_true) AS y_mean
+    FROM predictions
+    WHERE is_test = 1
+),
+errs AS (
+    SELECT
+        (y_true - y_pred)               AS err,
+        (y_true - (SELECT y_mean FROM stats)) AS dev
+    FROM predictions
+    WHERE is_test = 1
+)
+SELECT
+    1 - SUM(POWER(err,2)) / NULLIF(SUM(POWER(dev,2)),0) AS r2
+FROM errs;
+```
 
-  * Países con mayor `|y_true - y_pred|`.
-  * Útil para discusión: regiones donde el modelo no captura bien la realidad.
+**KPIs por año (solo test):**
 
-Estos indicadores se calculan filtrando `is_test = 1` para asegurar que la evaluación del modelo se basa únicamente en datos no usados en el entrenamiento.
+```sql
+WITH base AS (
+    SELECT
+        year,
+        y_true,
+        y_pred
+    FROM predictions
+    WHERE is_test = 1
+)
+SELECT
+    year,
+    COUNT(*)                                 AS n,
+    AVG(ABS(y_true - y_pred))                AS mae,
+    SQRT(AVG(POWER(y_true - y_pred,2)))      AS rmse
+FROM base
+GROUP BY year
+ORDER BY year;
+```
+
+**Top 10 errores (solo test):**
+
+```sql
+SELECT
+    country,
+    year,
+    y_true,
+    y_pred,
+    ABS(y_true - y_pred) AS abs_error
+FROM predictions
+WHERE is_test = 1
+ORDER BY abs_error DESC
+LIMIT 10;
+```
+
+Estos resultados alimentan directamente el análisis y el dashboard.
 
 ---
 
-## 7. Limitaciones & Próximos Pasos
+## 9. Dashboard (Power BI) – Vista conceptual 🎨
 
-* El modelo actual es lineal: se pueden explorar alternativas:
+El dashboard se construye sobre la tabla `predictions` en PostgreSQL.
 
-  * Ridge/Lasso, Random Forest, Gradient Boosting, etc.
-* Incluir nuevas variables:
+### Página 1 – Entrenamiento & Datos
 
-  * Región, variables socioeconómicas adicionales, interacciones.
-* Validaciones más robustas:
+* Card: `Total registros`
+* Card: `Registros train`
+* Card: `Registros test`
+* Bar chart:
 
-  * K-Fold, validación temporal, análisis de estabilidad.
-* Monitoreo en producción:
+  * Eje X: `year`
+  * Valores: cantidad train/test
+* Scatter:
 
-  * Revisión periódica de KPIs por año/país.
-  * Reentrenamiento cuando cambie la distribución de los datos.
+  * X: `GDP per capita`
+  * Y: `y_true`
+  * Filtro: `is_train = 1`
+  * Objetivo: mostrar con qué datos se entrenó el modelo.
+
+### Página 2 – Performance del Modelo (Test)
+
+* Cards:
+
+  * `R² test`, `MAE test`, `RMSE test`
+* Scatter:
+
+  * X: `y_pred`
+  * Y: `y_true`
+  * Filtro: `is_test = 1`
+  * Para ver qué tan cerca estamos de la diagonal perfecta.
+* Tabla o bar chart:
+
+  * Top países con mayor error absoluto (solo test).
+
+Con esto el profesor ve:
+
+* Que el modelo se entrenó correctamente.
+* Que la evaluación usa únicamente datos de prueba.
+* Que la arquitectura conecta todo: CSV → ETL → Modelo → Kafka → Postgres → BI.
 
 ---
 
-Este documento resume el diseño técnico del pipeline:
+## 10. Conclusiones ✅
 
-**EDA → ETL unificado → Entrenamiento reproducible → Streaming con Kafka → Predicciones en PostgreSQL → Evaluación y visualización en Power BI.**
+* Se implementó un flujo **consistente y reproducible**:
+
+  * Misma lógica de ETL para EDA, entrenamiento y streaming.
+  * Modelo simple pero interpretable.
+  * Separación clara entre datos de entrenamiento y prueba mediante flags en el DW.
+* Kafka y PostgreSQL permiten simular un escenario real:
+
+  * Streaming de datos.
+  * Aplicación de modelo en línea.
+  * Persistencia centralizada.
+* El Data Warehouse expone una sola tabla (`predictions`) desde la cual:
+
+  * Se pueden calcular KPIs del modelo.
+  * Se construyen dashboards limpios y defendibles.
+
+Este documento sirve como respaldo técnico del proyecto para revisión académica o profesional.
