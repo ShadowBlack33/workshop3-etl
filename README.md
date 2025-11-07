@@ -1,4 +1,3 @@
-````markdown
 # Workshop 3 — World Happiness (2015–2019) 🌍  
 **Streaming + ETL + ML + Data Warehouse + Power BI**
 
