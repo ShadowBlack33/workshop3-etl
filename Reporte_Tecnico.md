@@ -36,13 +36,13 @@ Este proyecto está diseñado como un mini ecosistema de datos moderno:
     - Features
     - Valor real (`y_true`)
     - Predicción (`y_pred`)
-    - Flags de si fue train/test
+    - Flags de si fue train/test.
 
 - 🐳 **Docker / docker-compose**
   - Orquesta servicios de:
     - Kafka
     - Zookeeper
-    - PostgreSQL
+    - PostgreSQL.
 
 - 🧩 **Visual Studio Code**
   - Editor principal del proyecto.
@@ -78,7 +78,7 @@ La estructura está pensada para separar claramente responsabilidades:
 │     # Volumen de datos de PostgreSQL (montado por Docker).
 │
 ├─ docs/
-│  ├─ REPORT.md
+│  └─ REPORT.md
 │     # Este documento técnico.
 │
 ├─ kafka/
@@ -189,7 +189,7 @@ Pasos principales del ETL:
 
      * EDA
      * Entrenamiento
-     * Streaming
+     * Streaming.
 
 ### 3.3. EDA (`notebooks/EDA.ipynb`)
 
@@ -197,9 +197,7 @@ Dentro del notebook se hace:
 
 * Descriptivos generales (media, min, max, etc.).
 * Distribuciones por feature.
-* Correlación entre:
-
-  * `Happiness Score` y cada feature.
+* Correlación entre `Happiness Score` y cada feature.
 * Comparación por años para ver estabilidad del comportamiento.
 
 **Decisión importante:**
@@ -275,26 +273,71 @@ Aquí conectamos todo: ETL + modelo + Kafka + Postgres.
 
 ```mermaid
 flowchart LR
-  subgraph RAW[CSV: 2015–2019]
-    A2015[2015.csv]
-    A2016[2016.csv]
-    A2017[2017.csv]
-    A2018[2018.csv]
-    A2019[2019.csv]
+  %% ======= HIGH-LEVEL ARCHITECTURE (CORRECT) =======
+
+  %% 1) Fuentes: CSV originales
+  subgraph RAW[Raw CSVs 2015–2019]
+    C2015[2015.csv]
+    C2016[2016.csv]
+    C2017[2017.csv]
+    C2018[2018.csv]
+    C2019[2019.csv]
   end
 
-  RAW --> B[ETL unificado<br/>(src/etl.py)]
-  B --> C[Entrenamiento<br/>(src/train_model.py)]
-  C --> M[Modelo .pkl<br/>(happiness_model.pkl)]
+  %% 2) Lógica compartida de ETL
+  subgraph LIB[Shared ETL Logic]
+    ETL[src/etl.py<br/>unify & clean]
+  end
 
-  B --> P[Producer<br/>(kafka/producer.py)]
-  M -. usado por .-> CO[Consumer<br/>(kafka/consumer.py)]
+  %% 3) Análisis offline + entrenamiento
+  subgraph OFFLINE[Offline EDA & Training]
+    EDA[EDA.ipynb]
+    TRAIN[src/train_model.py]
+    MODEL[(happiness_model.pkl)]
+  end
 
-  P -- mensajes JSON --> K[(Kafka<br/>topic: happiness_features)]
-  K --> CO
-  CO --> DW[(PostgreSQL<br/>tabla: predictions)]
+  %% 4) Streaming con Kafka
+  subgraph STREAM[Kafka Streaming]
+    PROD[kafka/producer.py<br/>ETL + flags train/test + send JSON]
+    TOPIC[(Kafka topic<br/>happiness_features)]
+    CONS[kafka/consumer.py<br/>load model + predict]
+  end
 
-  DW --> BI[Power BI<br/>Dashboard]
+  %% 5) Data Warehouse
+  subgraph DW[Data Warehouse]
+    PRED[(predictions table)]
+  end
+
+  %% 6) BI
+  subgraph BI[Analytics]
+    PBI[Power BI Dashboard]
+  end
+
+  %% RAW CSVs pasan por ETL (como librería)
+  C2015 --> ETL
+  C2016 --> ETL
+  C2017 --> ETL
+  C2018 --> ETL
+  C2019 --> ETL
+
+  %% ETL es usado por EDA, TRAIN y PRODUCER
+  ETL --> EDA
+  ETL --> TRAIN
+  ETL --> PROD
+
+  %% Entrenamiento genera el modelo .pkl
+  TRAIN --> MODEL
+
+  %% Producer usa ETL y envía a Kafka
+  PROD --> TOPIC
+
+  %% Consumer usa modelo + mensajes de Kafka
+  MODEL --> CONS
+  TOPIC --> CONS
+
+  %% Consumer guarda en el DW y BI consume
+  CONS --> PRED
+  PRED --> PBI
 ```
 
 ---
@@ -430,8 +473,8 @@ Con todo en `predictions`, podemos evaluar el modelo **directamente en PostgreSQ
 
 ```sql
 SELECT
-    COUNT(*)                           AS n,
-    AVG(ABS(y_true - y_pred))          AS mae,
+    COUNT(*)                            AS n,
+    AVG(ABS(y_true - y_pred))           AS mae,
     SQRT(AVG(POWER(y_true - y_pred,2))) AS rmse
 FROM predictions
 WHERE is_test = 1;
@@ -448,8 +491,8 @@ WITH stats AS (
 ),
 errs AS (
     SELECT
-        (y_true - y_pred)               AS err,
-        (y_true - (SELECT y_mean FROM stats)) AS dev
+        (y_true - y_pred)                        AS err,
+        (y_true - (SELECT y_mean FROM stats))    AS dev
     FROM predictions
     WHERE is_test = 1
 )
