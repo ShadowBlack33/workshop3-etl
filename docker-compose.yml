@@ -43,3 +43,17 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+
+  postgres:
+    image: postgres:14-alpine
+    container_name: workshop3-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: workshop3
+      POSTGRES_USER: workshop
+      POSTGRES_PASSWORD: workshop
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/pgdata:/var/lib/postgresql/data
+      
